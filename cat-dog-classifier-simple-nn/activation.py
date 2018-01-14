@@ -3,6 +3,7 @@
 import numpy as np
 
 def sigmoid(Z):
+    #print(-Z)
     return 1 / (1 + np.exp(-Z))
 
 def sigmoid_back(Z):

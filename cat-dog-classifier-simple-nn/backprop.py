@@ -51,7 +51,7 @@ def check_gradients(X,Y,parameters,L):
         params = ["W","b"]
         
         for p in params:
-            epsilon = 0.0001
+            epsilon = 0.000001
             
             parameters1 = copy.deepcopy(parameters)
             parameters2 = copy.deepcopy(parameters)

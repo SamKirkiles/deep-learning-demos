@@ -19,13 +19,17 @@ import forwardpropagate as fp
 import activation as a
 import backprop as bp
 
-X_train, y_train = load_data.loadData(_set='train',batch_iter=0,batch_size=100)
 
-#plt.imshow(X_train[:,0].reshape((100, 100, 3)))
+train_x_orig, train_y, test_x_orig, test_y, classes = load_data.loadDatah5()
+
+# Normalize Data-- Very important
+train_x_orig = (train_x_orig-np.mean(train_x_orig))/(np.max(train_x_orig)-np.min(train_x_orig))
+test_x_orig = (test_x_orig-np.mean(test_x_orig))/(np.max(test_x_orig)-np.min(test_x_orig))
+
 
 # Create features and training exmples
-m = X_train.shape[1]
-n = X_train.shape[0]
+m = train_x_orig.shape[1]
+n = train_x_orig.shape[0]
 
 # Number of hidden layers and Number of nodes on each layer
 n_h = 2
@@ -33,19 +37,19 @@ n_n = 2
 
 # Initalize weights
 
-dims = [n,20,20,1]
+dims = [n,7,7,1]
 
 parameters = weights.init_weights(dims)
 
-iterations = 10000
+iterations = 2500
 
 # Run forward and backprop
-fw, caches = fp.forward_propagate(parameters,X_train,len(dims))
-grads = bp.back_propagation(X_train, y_train, fw, len(dims), parameters, caches)
+fw, caches = fp.forward_propagate(parameters,train_x_orig,len(dims))
+grads = bp.back_propagation(train_x_orig, train_y, fw, len(dims), parameters, caches)
 
 first_grads = copy.deepcopy(grads)
 # Run check gradients method
-approx = bp.check_gradients(X_train,y_train,parameters,len(dims))
+approx = bp.check_gradients(train_x_orig,train_y,parameters,len(dims))
 
 print("----------------------------------------------------")
 
@@ -82,56 +86,58 @@ print("----------------------------------------------------")
 
 print("\n Printing Cost...\n")
 
+learning_rate = 0.01;
 
-batches = 1;
+j = 0
+cost = np.zeros((10,1))
 
-for b in range(0,batches):
-    X_train, y_train = load_data.loadData(_set='train',batch_iter=b,batch_size=100)
-    j = 0
-    cost = np.zeros((10,1))
+for i in range(0,iterations):    
+    fw, caches = fp.forward_propagate(parameters,train_x_orig,len(dims),dropout=False)
+    
+    grads = bp.back_propagation(train_x_orig, train_y, fw, len(dims), parameters, caches)
 
-    for i in range(0,iterations):    
-        fw, caches = fp.forward_propagate(parameters,X_train,len(dims),dropout=True)
+    parameters["W3"] -= learning_rate * grads["W3"]
+    parameters["b3"] -= learning_rate * grads["b3"]
+    
+    parameters["W2"] -= learning_rate * grads["W2"]
+    parameters["b2"] -= learning_rate* grads["b2"]
+    
+    parameters["W1"] -= learning_rate * grads["W1"]
+    parameters["b1"] -= learning_rate * grads["b1"]
+    
+    
+
+
+
+    # Cost
+    if i%(iterations/10) == 0:
+        cost[j] = fp.cost(train_y,fw)
+        print(cost[j])
+        j += 1
         
-        grads = bp.back_propagation(X_train, y_train, fw, len(dims), parameters, caches)
-    
-        parameters["W3"] -= 0.01 * grads["W3"]
-        parameters["b3"] -= 0.01 * grads["b3"]
-        
-        parameters["W2"] -= 0.01 * grads["W2"]
-        parameters["b2"] -= 0.01 * grads["b2"]
-        
-        parameters["W1"] -= 0.01 * grads["W1"]
-        parameters["b1"] -= 0.01 * grads["b1"]
-    
-    
-    
-        # Cost
-        if i%(iterations/10) == 0:
-            cost[j] = fp.cost(y_train,fw)
-            print(cost[j])
-            j += 1
+        approx = bp.check_gradients(train_x_orig,train_y,parameters,len(dims))
 
 
-    plt.subplot()
-    plt.plot(cost)
-    plt.xlabel('Iterations')
-    plt.ylabel('Cost')
-    plt.show()
+
+
+plt.subplot()
+plt.plot(cost)
+plt.xlabel('Iterations')
+plt.ylabel('Cost')
+plt.show()
 
 # This is how we train the model
 
-fw, caches = fp.forward_propagate(parameters,X_train,len(dims))
+fw, caches = fp.forward_propagate(parameters,train_x_orig,len(dims))
 
 
 print("Final Cost")
-print(fp.cost(y_train,fw))  
+print(fp.cost(train_y,fw))  
 
-print("Accuracy on training set: ", np.mean((fw>=0.5) == y_train) * 100)
+print("Accuracy on training set: ", np.mean((fw>=0.5) == train_y) * 100)
 
-X_test, y_test = load_data.loadData(32,_set='test')
 
-fwt, cachest = fp.forward_propagate(parameters,X_test,len(dims))
+fwt, cachest = fp.forward_propagate(parameters,test_x_orig,len(dims))
 
-print("Accuracy on test set: ", np.mean((fwt>=0.5) == y_test) * 100)
+print("Accuracy on test set: ", np.mean((fwt>=0.5) == test_y) * 100)
 
