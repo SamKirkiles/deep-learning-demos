@@ -11,14 +11,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import copy
 
-
 # Load the cats and dogs
 import load_data
 import initialize_weights as weights
 import forwardpropagate as fp
 import activation as a
 import backprop as bp
-
 
 train_x_orig, train_y, test_x_orig, test_y, classes = load_data.loadDatah5()
 
@@ -91,10 +89,12 @@ learning_rate = 0.01;
 j = 0
 cost = np.zeros((10,1))
 
+dropout = False
+
 for i in range(0,iterations):    
-    fw, caches = fp.forward_propagate(parameters,train_x_orig,len(dims),dropout=False)
+    fw, caches = fp.forward_propagate(parameters,train_x_orig,len(dims),dropout=dropout)
     
-    grads = bp.back_propagation(train_x_orig, train_y, fw, len(dims), parameters, caches)
+    grads = bp.back_propagation(train_x_orig, train_y, fw, len(dims), parameters, caches,dropout=dropout)
 
     parameters["W3"] -= learning_rate * grads["W3"]
     parameters["b3"] -= learning_rate * grads["b3"]
@@ -105,21 +105,12 @@ for i in range(0,iterations):
     parameters["W1"] -= learning_rate * grads["W1"]
     parameters["b1"] -= learning_rate * grads["b1"]
     
-    
-
-
-
     # Cost
     if i%(iterations/10) == 0:
         cost[j] = fp.cost(train_y,fw)
         print(cost[j])
         j += 1
         
-        approx = bp.check_gradients(train_x_orig,train_y,parameters,len(dims))
-
-
-
-
 plt.subplot()
 plt.plot(cost)
 plt.xlabel('Iterations')

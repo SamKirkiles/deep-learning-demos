@@ -14,31 +14,26 @@ def forward_propagate(parameters,X, L,dropout=False):
     
     caches = {}
     
-    A_prev = X
-    Z_temp = 0;
+    caches["Z1"] = parameters["W1"].dot(X) + parameters["b1"]
+    caches["a1"] = a.relu(caches["Z1"])
+
+    if dropout == True:    
+        caches["D1"] = np.random.rand(caches["a1"].shape[0],caches["a1"].shape[1]) < 0.8
+        caches["a1"] *= caches["D1"]
+        caches["a1"] /= 0.5
+
+ 
+    caches["Z2"] = parameters["W2"].dot(caches["a1"]) + parameters["b2"]
+    caches["a2"] = a.relu(caches["Z2"])
     
-    for i in range (1,L-1):
-        
 
-        
-        Z_temp = parameters["W" + str(i)].dot(A_prev) + parameters["b" + str(i)]
-        A_prev = a.relu(Z_temp)
-        
-        if (dropout == True):
-            drop = np.random.rand(A_prev.shape[0],A_prev.shape[1]) < 0.8
-            A_prev *= drop
-            A_prev /= 0.8
+    if dropout == True:    
+        caches["D2"] = np.random.rand(caches["a2"].shape[0],caches["a2"].shape[1]) < 0.8
+        caches["a2"] *= caches["D2"]
+        caches["a2"] /= 0.5    
 
-        
-        caches["Z" + str(i)] = Z_temp
-        caches["a" + str(i)] = A_prev
-        
     # on the last layer we would like to compute the sigmoid for each examples
-    Z = parameters["W" + str(L-1)].dot(A_prev) + parameters["b" + str(L-1)]
-    AL = a.sigmoid(Z)
+    caches["Z3"] = parameters["W3"].dot(caches["a2"]) + parameters["b3"]
+    caches["a3"] = a.sigmoid(caches["Z3"])
     
-    caches["Z" + str(L-1)] = Z
-    caches["a" + str(L-1)] = AL
-
-    
-    return AL, caches
+    return caches["a3"], caches

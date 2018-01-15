@@ -13,4 +13,4 @@ def relu(Z):
     return Z * (Z > 0)
 
 def relu_back(Z):
-    return 1 * (Z>0)
+    return np.int64(Z > 0)
