@@ -18,7 +18,7 @@ import forwardpropagate as fp
 import activation as a
 import backprop as bp
 
-train_x_orig, train_y, test_x_orig, test_y, classes = load_data.loadDatah5()
+train_x_orig, train_y, test_x_orig, test_y, classes, shape = load_data.load_data()
 
 # Normalize Data-- Very important
 train_x_orig = (train_x_orig-np.mean(train_x_orig))/(np.max(train_x_orig)-np.min(train_x_orig))

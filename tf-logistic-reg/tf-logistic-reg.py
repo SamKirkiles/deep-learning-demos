@@ -46,12 +46,14 @@ with tf.Session() as sess:
         
         cost, summary = sess.run([cross_entropy, merge], feed_dict={x: batch[0],y_: batch[1]})
         writer.add_summary(summary,i)
+
+
+
         
     correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
     final_accuracy = accuracy.eval(feed_dict={x: mnist.test.images, y_: mnist.test.labels}) 
-
     num_summary = tf.Summary()
     num_summary.value.add(tag="accuracy", simple_value=final_accuracy)
     writer.add_summary(num_summary)
