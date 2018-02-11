@@ -178,16 +178,9 @@ print("Calculated First Gradient W4: " + str(dz4[0,0]) + "\n")
 grad_W3 = check_gradients(train_y_one_hot[0:m,...], weights,"W3")
 print("Gradient W3: " + str(grad_W3))
 
+grad_W2 = check_gradients(train_y_one_hot[0:m,...], weights,"W2")
+print("Gradient W2: " + str(grad_W2))
 
+grad_W1 = check_gradients(train_y_one_hot[0:m,...], weights,"W1")
+print("Gradient W1: " + str(grad_W1))
 
-"""
-# Main training loop
-
-for i in range(100):
-    cost = forward_propagate(weights,caches)
-    
-    softmax_grad = softmax_back(caches["A4"], train_y_one_hot[0:m,...],m)
-    dz4 = caches["A3"].T.dot(softmax_grad)
-    
-    weights["W4"] -= 0.01 * dz4.T
-"""
