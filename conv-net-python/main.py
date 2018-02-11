@@ -123,8 +123,7 @@ def check_gradients(Y,weights,key):
     parameters2[key][0,0] -= epsilon
     
     weight_dict_1,activation_caches_1,cost1 = forward_propagate(parameters1)
-    weight_dict_2,activation_caches_1,cost2 = forward_propagate(parameters2)
-            
+    weight_dict_2,activation_caches_2,cost2 = forward_propagate(parameters2)
 
     return (cost1 - cost2) / (2. *epsilon)
 
@@ -141,10 +140,10 @@ def forward_propagate(weight_dict):
     activation_caches["A2"] = relu(Z2)
     pool2=max_pooling(activation_caches["A2"],2)
     
-    pool2_flat = pool2.reshape((m, pool2.shape[1] * pool2.shape[2] * pool2.shape[3]))
+    activation_caches["Ar2"] = pool2.reshape((m, pool2.shape[1] * pool2.shape[2] * pool2.shape[3]))
     
-    Z3 = fully_connected(pool2_flat, weight_dict["W3"])
-    activation_caches["A3"] = relu(Z3)
+    activation_caches["Z3"] = fully_connected(activation_caches["Ar2"], weight_dict["W3"])
+    activation_caches["A3"] = relu(activation_caches["Z3"])
     
     activation_caches["Z4"] = fully_connected(activation_caches["A3"],weight_dict["W4"])
     
@@ -154,6 +153,10 @@ def forward_propagate(weight_dict):
     cost = np.mean(softmax_cost(train_y_one_hot[0:m,...], activation_caches["A4"]))
     
     return weight_dict,activation_caches,cost
+
+"""
+Initialize Weights
+"""
 
 np.random.seed(3)
         
@@ -165,22 +168,24 @@ weights["W4"] = np.random.rand(10,10)
 
 weight_dict,activation_caches,cost = forward_propagate(weights)
 
-"""Backpropagaton"""
+"""
+Back Propagation
+"""
+
+print("\nTesting Backprop \n")
 
 softmax_grad = softmax_back(activation_caches["A4"], train_y_one_hot[0:m,...], m)
 dz4 = activation_caches["A3"].T.dot(softmax_grad)
 
 grad_W4 = check_gradients(train_y_one_hot[0:m,...], weight_dict,"W4")
-print("First Gradient Approx W4: " + str(grad_W4))
-print("Calculated First Gradient W4: " + str(dz4[0,0]) + "\n")
+print("First Gradient Approx W4:     " + str(grad_W4))
+print("First Gradient Calculated W4: " + str(dz4[0,0]) + "\n")
 
+da3 = (weights["W4"].dot(softmax_grad.T)).T
+dz3 = relu_back(activation_caches["Z3"]) * da3
+dw3 = activation_caches["Ar2"].T.dot(dz3)
 
 grad_W3 = check_gradients(train_y_one_hot[0:m,...], weights,"W3")
-print("Gradient W3: " + str(grad_W3))
-
-grad_W2 = check_gradients(train_y_one_hot[0:m,...], weights,"W2")
-print("Gradient W2: " + str(grad_W2))
-
-grad_W1 = check_gradients(train_y_one_hot[0:m,...], weights,"W1")
-print("Gradient W1: " + str(grad_W1))
+print("Second Gradient Approx W3:     " + str(grad_W3))
+print("Second Gradient Calculated W3: " + str(dw3[0,0]) + "\n")
 
