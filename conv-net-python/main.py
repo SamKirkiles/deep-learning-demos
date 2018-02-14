@@ -59,6 +59,7 @@ def conv_forward(a_prev, _filter, parameters):
         a_prev_pad_i = a_prev_pad[i] 
         for h in range(n_H):
             for w in range(n_W):
+                # C is the number of filters
                 for c in range(n_C):
                     
                     vert_start = h*stride
@@ -72,7 +73,7 @@ def conv_forward(a_prev, _filter, parameters):
                     
     return Z
 
-def conv_back(pool_prev, _filter, prevd, pad=2, stride=1):
+def conv_back(pool_prev, ud, _filter, pad=2, stride=1):
     
     #The filter.shape should be the output we are looking for
     # 9
@@ -99,7 +100,8 @@ def conv_back(pool_prev, _filter, prevd, pad=2, stride=1):
                     
                     
                     a_slice = a_prev_pad[i,vert_start:vert_end,horiz_start:horiz_end,:]
-                    empty[h,w,c,:] = np.sum(a_slice)
+                    d_slice = ud[i,vert_start:vert_end,horiz_start:horiz_end,:]
+                    empty[h,w,c,:] = np.sum(a_slice * d_slice)
                     
     return empty
 
@@ -177,8 +179,8 @@ def check_gradients(Y,weights,key,dims=False):
     
 
     if dims:
-        parameters1[key][0,0,0,0] += epsilon
-        parameters2[key][0,0,0,0] -= epsilon
+        parameters1[key][1,0,0,0] += epsilon
+        parameters2[key][1,0,0,0] -= epsilon
     else:
         parameters1[key][0,0] += epsilon
         parameters2[key][0,0] -= epsilon
@@ -257,8 +259,7 @@ print("Second Gradient Approx W2:     " + str(grad_W2))
 dpool2 = weights["W3"].dot(dz3.T)
 dpool2_reshape = dpool2.reshape(activation_caches["pool2"].shape)
 
-dpool2_n = max_pooling_back(activation_caches["A2"], activation_caches["pool2"],dpool2_reshape)
-da2 = relu_back(activation_caches["conv2"]) * dpool2_n
-dc2 = conv_back(da2,weights["W2"]) 
-#dc2 =
+da2 = max_pooling_back(activation_caches["A2"], activation_caches["pool2"],dpool2_reshape)
+dc2 = relu_back(activation_caches["conv2"]) * da2
+df2 = conv_back(activation_caches["pool1"],dc2,weights["W2"]) 
 
