@@ -43,7 +43,7 @@ def conv_forward(a_prev, _filter, parameters):
     stride = parameters['stride']
     pad = parameters['pad']
     
-    (m, n_H_prev, n_W_prev, channels) = a_prev.shape
+    (m, n_H_prev, n_W_prev, n_C_prev) = a_prev.shape
     (f,f, n_C_prev, n_C) = _filter.shape
    
     n_H = int(((n_H_prev - f + 2 * pad)/stride)+1)
@@ -52,24 +52,25 @@ def conv_forward(a_prev, _filter, parameters):
     a_prev_pad = np.pad(a_prev, ((0,0),(pad,pad),(pad,pad),(0,0)), 'constant', constant_values=0)
    
     Z = np.zeros((m,n_H,n_W,n_C))
-    
+        
     
     for i in range(m):  
-        #print('\r{0}\r'.format(i), end='', flush=True)
-        a_prev_pad_i = a_prev_pad[i] 
         for h in range(n_H):
             for w in range(n_W):
-                # C is the number of filters
                 for c in range(n_C):
-                    
-                    vert_start = h*stride
-                    vert_end = vert_start + f
-                    horiz_start = w * stride
-                    horiz_end = horiz_start + f
-                    
-                    a_slice = a_prev_pad_i[vert_start:vert_end,horiz_start:horiz_end,:]
-                    
-                    Z[i,h,w,c] = np.sum(np.multiply(a_slice, _filter[...,c]))
+                    for channel in range(n_C_prev):
+
+                        
+                        vert_start = h*stride
+                        vert_end = vert_start + f
+                        horiz_start = w * stride
+                        horiz_end = horiz_start + f
+                        
+                        a_slice = a_prev_pad[i,vert_start:vert_end,horiz_start:horiz_end,channel]
+                        
+                        
+                        
+                        Z[i,h,w,c] += np.sum(np.multiply(a_slice, _filter[:,:,channel,c]))
                     
     return Z
 
@@ -77,7 +78,10 @@ def conv_back(pool_prev, ud, _filter, pad=2, stride=1):
     
     #The filter.shape should be the output we are looking for
     # 9
-    
+
+    # The n_C_prev is the number of channels in the input to this convlution
+    # The n_c is the number of channels in the output layer 
+        
     (m, n_H, n_W, channels) = pool_prev.shape
     (f,f, n_C_prev, n_C) = _filter.shape
 
@@ -88,20 +92,22 @@ def conv_back(pool_prev, ud, _filter, pad=2, stride=1):
     empty = np.zeros((f,f, n_C_prev, n_C))
     
     for i in range(m):
-
         for h in range(f):
             for w in range(f):
                 for c in range(n_C):
+                    for channel in range(n_C_prev):
+
                     
-                    vert_start = h*stride
-                    vert_end = vert_start + f
-                    horiz_start = w * stride
-                    horiz_end = horiz_start + f
-                    
-                    
-                    a_slice = a_prev_pad[i,vert_start:vert_end,horiz_start:horiz_end,:]
-                    d_slice = ud[i,vert_start:vert_end,horiz_start:horiz_end,:]
-                    empty[h,w,c,:] = np.sum(a_slice * d_slice)
+                        vert_start = h*stride
+                        vert_end = vert_start + f
+                        horiz_start = w * stride
+                        horiz_end = horiz_start + f
+                         
+                        # df2 = conv_back(activation_caches["pool1"],dc2,weights["W2"]) 
+     
+                        a_slice = a_prev_pad[i,vert_start:vert_end,horiz_start:horiz_end,c]
+                        d_slice = ud[i,vert_start:vert_end,horiz_start:horiz_end,c]
+                        empty[h,w,channel,c] = np.sum(a_slice * d_slice)
                     
     return empty
 
@@ -178,9 +184,9 @@ def check_gradients(Y,weights,key,dims=False):
     parameters2 = copy.deepcopy(weights)
     
 
-    if dims:
-        parameters1[key][1,0,0,0] += epsilon
-        parameters2[key][1,0,0,0] -= epsilon
+    if dims == True:
+        parameters1[key][0,0,0,0] += epsilon
+        parameters2[key][0,0,0,0] -= epsilon
     else:
         parameters1[key][0,0] += epsilon
         parameters2[key][0,0] -= epsilon
@@ -225,9 +231,9 @@ Initialize Weights
 np.random.seed(3)
         
 weights = {}
-weights["W1"] = np.random.rand(5,5,3,3) * 0.01
-weights["W2"] = np.random.rand(5,5,3,3) * 0.01
-weights["W3"] = np.random.rand(192,10)
+weights["W1"] = np.random.rand(5,5,3,4) * 0.01
+weights["W2"] = np.random.rand(5,5,3,4) * 0.01
+weights["W3"] = np.random.rand(256,10)
 weights["W4"] = np.random.rand(10,10)
 
 weight_dict,activation_caches,cost = forward_propagate(weights)
@@ -238,12 +244,13 @@ Back Propagation
 
 print("\nTesting Backprop \n")
 
+
 softmax_grad = softmax_back(activation_caches["A4"], train_y_one_hot[0:m,...], m)
-dz4 = activation_caches["A3"].T.dot(softmax_grad)
+dw4 = activation_caches["A3"].T.dot(softmax_grad)
 
 grad_W4 = check_gradients(train_y_one_hot[0:m,...], weight_dict,"W4")
-print("First Gradient Approx W4:      " + str(grad_W4))
-print("First Gradient Calculated W4: " + str(dz4[0,0]) + "\n")
+print("First Gradient Approx W4:     " + str(grad_W4))
+print("First Gradient Calculated W4: " + str(dw4[0,0]) + "\n")
 
 da3 = (weights["W4"].dot(softmax_grad.T)).T
 dz3 = relu_back(activation_caches["Z3"]) * da3
@@ -257,9 +264,39 @@ grad_W2 = check_gradients(train_y_one_hot[0:m,...], weights,"W2", True)
 print("Second Gradient Approx W2:     " + str(grad_W2))
 
 dpool2 = weights["W3"].dot(dz3.T)
+#dpool2 = dz3.dot(weights["W3"].T).T
 dpool2_reshape = dpool2.reshape(activation_caches["pool2"].shape)
 
 da2 = max_pooling_back(activation_caches["A2"], activation_caches["pool2"],dpool2_reshape)
 dc2 = relu_back(activation_caches["conv2"]) * da2
 df2 = conv_back(activation_caches["pool1"],dc2,weights["W2"]) 
 
+iterations = 100
+
+"""
+for i in range(iterations):
+        
+    weight_dict,activation_caches,cost = forward_propagate(weights)
+    print(cost)
+        
+        
+    softmax_grad = softmax_back(activation_caches["A4"], train_y_one_hot[0:m,...], m)
+    dz4 = activation_caches["A3"].T.dot(softmax_grad)
+    
+    
+    da3 = (weights["W4"].dot(softmax_grad.T)).T
+    dz3 = relu_back(activation_caches["Z3"]) * da3
+    dw3 = activation_caches["Ar2"].T.dot(dz3)
+    
+        
+    dpool2 = weights["W3"].dot(dz3.T)
+    dpool2_reshape = dpool2.reshape(activation_caches["pool2"].shape)
+    
+    da2 = max_pooling_back(activation_caches["A2"], activation_caches["pool2"],dpool2_reshape)
+    dc2 = relu_back(activation_caches["conv2"]) * da2
+    df2 = conv_back(activation_caches["pool1"],dc2,weights["W2"]) 
+    
+    #weights["W4"] -= 0.01 * dz4
+    #weights["W3"] -= 0.01 * dw3
+    weights["W2"] -= 0.01 * df2
+"""
