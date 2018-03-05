@@ -17,7 +17,7 @@ except NameError:
     classes = cifar10.load_class_names()
 
 
-m = 2
+m = 50
 
 train_x = train_x_raw[0:m]
 
@@ -35,7 +35,7 @@ def relu(x):
 def relu_back(Z):
     return np.int64(Z > 0)
 
-def conv_forward(_input,_filter,pad,stride):
+def conv_forward_naive(_input,_filter,pad,stride):
 
     
     (m, n_h, n_w, n_C_prev) = _input.shape
@@ -69,7 +69,7 @@ def conv_forward(_input,_filter,pad,stride):
 
 
 
-def conv_back(_input,_filter,pad,stride,dout):
+def conv_back_naive(_input,_filter,pad,stride,dout):
  
     (m, n_h, n_w, n_C_prev) = _input.shape
     (f,f, n_C_prev, n_C) = _filter.shape
@@ -138,7 +138,7 @@ def max_pooling(prev_layer, filter_size=2):
     return pooling
 
 
-def max_pooling_back(prev, pool, dmult, filter_size=2):
+def max_pooling_back(prev, pool, dout, filter_size=2):
         
     (m, n_H, n_W, channels) = pool.shape
     (m_prev, n_prev_H, n_prev_W, channels_prev) = prev.shape
@@ -157,7 +157,7 @@ def max_pooling_back(prev, pool, dmult, filter_size=2):
                                         
                     mask = prev[i,vert_start:vert_end,horiz_start:horiz_end,c] == pool[i,h,w,c]
      
-                    empty[i,vert_start:vert_end,horiz_start:horiz_end,c] = mask * dmult[i,h,w,c]
+                    empty[i,vert_start:vert_end,horiz_start:horiz_end,c] = mask * dout[i,h,w,c]
                     
     return empty
                     
@@ -182,8 +182,8 @@ def check_gradients(weights,key,four_dimensional=False,inline_checker=False):
     parameters2 = copy.deepcopy(weights)
     
     if inline_checker:
-        weight_dict_1,activation_caches_1,cost1 = forward_propagate(parameters1,1)
-        weight_dict_2,activation_caches_2,cost2 = forward_propagate(parameters2,2)
+        activation_caches_1,cost1 = forward_propagate(parameters1,1)
+        activation_caches_2,cost2 = forward_propagate(parameters2,2)
 
     else:
         if four_dimensional == True:
@@ -193,37 +193,37 @@ def check_gradients(weights,key,four_dimensional=False,inline_checker=False):
             parameters1[key][0,0] += epsilon
             parameters2[key][0,0] -= epsilon
     
-        weight_dict_1,activation_caches_1,cost1 = forward_propagate(parameters1)
-        weight_dict_2,activation_caches_2,cost2 = forward_propagate(parameters2)
+        activation_caches_1,cost1 = forward_propagate(parameters1)
+        activation_caches_2,cost2 = forward_propagate(parameters2)
 
     return (cost1 - cost2) / (2. *epsilon)
 
 
-def forward_propagate(weight_dict,forward=0):
+def forward_propagate(weights):
     
     activation_caches = {}
 
-    activation_caches["conv1"] = conv_forward(train_x,weight_dict["W1"],2,1)
+    activation_caches["conv1"] = conv_forward_naive(train_x,weights["W1"],2,1)
     activation_caches["A1"] = relu(activation_caches["conv1"])
     activation_caches["pool1"] = max_pooling(activation_caches["A1"],2)
 
     
-    activation_caches["conv2"] = conv_forward(activation_caches["pool1"],weight_dict["W2"],2,1)   
+    activation_caches["conv2"] = conv_forward_naive(activation_caches["pool1"],weights["W2"],2,1)   
     activation_caches["A2"] = relu(activation_caches["conv2"])
     activation_caches["pool2"]=max_pooling(activation_caches["A2"],2)       
     activation_caches["Ar2"] = activation_caches["pool2"].reshape((m, activation_caches["pool2"].shape[1] * 
                      activation_caches["pool2"].shape[2] * activation_caches["pool2"].shape[3]))
 
-    activation_caches["Z3"] = fully_connected(activation_caches["Ar2"], weight_dict["W3"])
+    activation_caches["Z3"] = fully_connected(activation_caches["Ar2"], weights["W3"])
     activation_caches["A3"] = relu(activation_caches["Z3"])
     
     
-    activation_caches["Z4"] = fully_connected(activation_caches["A3"],weight_dict["W4"])
+    activation_caches["Z4"] = fully_connected(activation_caches["A3"],weights["W4"])
     activation_caches["A4"] = softmax(activation_caches["Z4"])
     
     cost = np.mean(softmax_cost(train_y_one_hot[0:m,...], activation_caches["A4"]))
     
-    return weight_dict,activation_caches,cost
+    return activation_caches,cost
 
 """
 Initialize Weights
@@ -237,47 +237,56 @@ weights["W2"] = np.random.rand(5,5,4,4) * 0.01
 weights["W3"] = np.random.rand(256,10)
 weights["W4"] = np.random.rand(10,10)
 
-weight_dict,activation_caches,cost= forward_propagate(weights)
 
 """
 Back Propagation
 """
 
-print("\nTesting Backprop \n")
+def backward_propagate_check(df1,df2,dw3,dw4, weights):
+    grad_W4 = check_gradients(weights,"W4")
+    print("Gradient Approx W4:     " + str(grad_W4))
+    print("Gradient Calculated W4: " + str(dw4[0,0]) + "\n")
+    
+    grad_W3 = check_gradients(weights,"W3")
+    print("Gradient Approx W3:     " + str(grad_W3))
+    print("Gradient Calculated W3: " + str(dw3[0,0]) + "\n")
+    
+    grad_W2 = check_gradients(weights,"W2",True,False)
+    print("Gradient Approx W2:     " + str(grad_W2))
+    print("Gradient Calculated W2: " + str(df2[0,0,0,0]) + "\n")
+
+    grad_W1 = check_gradients(weights,"W1",True,False)
+    print("Gradient Approx W1:     " + str(grad_W1))
+    print("Gradient Calculated W1: " + str(df1[0,0,0,0]))
+    
+    
+def backward_propagate(weights,caches):
+    
+    print("\nTesting Backprop \n")
+    
+    softmax_grad = softmax_back(caches["A4"], train_y_one_hot[0:m,...], m)
+    dw4 = caches["A3"].T.dot(softmax_grad)
+    
+    
+    da3 = (weights["W4"].dot(softmax_grad.T)).T
+    dz3 = relu_back(caches["Z3"]) * da3
+    dw3 = caches["Ar2"].T.dot(dz3)
+    
+    dpool2 = weights["W3"].dot(dz3.T).T
+    dpool2_reshape = dpool2.reshape(caches["pool2"].shape)
+    
+    da2 = max_pooling_back(caches["A2"], caches["pool2"],dpool2_reshape)
+    dz2 = relu_back(caches["conv2"]) * da2
+    df2,dpool1 = conv_back_naive(caches["pool1"],weights["W2"],2,1,dz2) 
+    
+    da1 = max_pooling_back(caches["A1"], caches["pool1"],dpool1)
+    dz1 = relu_back(caches["conv1"]) * da1
+    df1,dinput = conv_back_naive(train_x,weights["W1"],2,1,dz1) 
+    
+    return df1,df2,dw3,dw4
 
 
-softmax_grad = softmax_back(activation_caches["A4"], train_y_one_hot[0:m,...], m)
-dw4 = activation_caches["A3"].T.dot(softmax_grad)
+caches,cost = forward_propagate(weights)
+df1,df2,dw3,dw4 = backward_propagate(weights,caches)
+backward_propagate_check(df1,df2,dw3,dw4,weights)
 
-grad_W4 = check_gradients(weight_dict,"W4")
-print("Gradient Approx W4:     " + str(grad_W4))
-print("Gradient Calculated W4: " + str(dw4[0,0]) + "\n")
-
-da3 = (weights["W4"].dot(softmax_grad.T)).T
-dz3 = relu_back(activation_caches["Z3"]) * da3
-dw3 = activation_caches["Ar2"].T.dot(dz3)
-
-grad_W3 = check_gradients(weights,"W3")
-print("Gradient Approx W3:     " + str(grad_W3))
-print("Gradient Calculated W3: " + str(dw3[0,0]) + "\n")
-
-dpool2 = weights["W3"].dot(dz3.T).T
-dpool2_reshape = dpool2.reshape(activation_caches["pool2"].shape)
-
-da2 = max_pooling_back(activation_caches["A2"], activation_caches["pool2"],dpool2_reshape)
-dz2 = relu_back(activation_caches["conv2"]) * da2
-df2,dpool1 = conv_back(activation_caches["pool1"],weights["W2"],2,1,dz2) 
-
-grad_W2 = check_gradients(weights,"W2",True,False)
-print("Gradient Approx W2:     " + str(grad_W2))
-print("Gradient Calculated W2: " + str(df2[0,0,0,0]) + "\n")
-
-da1 = max_pooling_back(activation_caches["A1"], activation_caches["pool1"],dpool1)
-dz1 = relu_back(activation_caches["conv1"]) * da1
-df1,dinput = conv_back(train_x,weights["W1"],2,1,dz1) 
-
-grad_W1 = check_gradients(weights,"W1",True,False)
-print("Gradient Approx W1:     " + str(grad_W1))
-print("Gradient Calculated W1: " + str(df1[0,0,0,0]))
-
-iterations = 100
