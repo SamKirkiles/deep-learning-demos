@@ -35,6 +35,57 @@ def relu(x):
 def relu_back(Z):
     return np.int64(Z > 0)
 
+def im2col_flat(x,field_height,field_width,padding,stride):
+    
+    N,H, W, C = x.shape
+    
+    n_H = int(((H - field_height + 2 * padding)/stride)+1)
+    n_W = int(((W - field_width + 2 * padding)/stride)+1)
+    
+    p = padding
+    x_padded = np.pad(x, ((0, 0), (p, p), (p, p), (0, 0)), mode='constant')
+
+    #Find the shape of the filters across n_H
+        
+    filters_h = np.repeat(np.arange(field_height),field_width)
+    
+    height = stride * np.repeat(np.arange(n_H),n_W).reshape(-1,1)
+    height_index = filters_h + height
+    
+    i = np.tile(height_index,C)
+    
+    filters_w = np.tile(np.arange(field_width),field_height)
+    width = stride * np.tile(np.arange(n_W),n_H).reshape(-1,1)
+    width_index = filters_w + width
+
+    j = np.tile(width_index,C)
+    
+    k = np.repeat(np.arange(C),field_height*field_width)
+    
+    
+    return x_padded[:,i,j,k]
+    
+                        
+def conv_fast(x,w_filter,padding=1,stride=1):
+    
+    
+    N,H, W, C = x.shape
+    
+    n_H = int(((H - w_filter.shape[0]+ 2 * padding)/stride)+1)
+    n_W = int(((W - w_filter.shape[1] + 2 * padding)/stride)+1)
+
+    
+    flat = im2col_flat(x,w_filter.shape[0],w_filter.shape[1],padding,stride)
+    
+    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[1],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1).T
+    
+    conv =   flat.dot(filter_flat)
+                 
+    #now the final reshape
+    conv = conv.reshape(N,n_H,n_W,w_filter.shape[3])
+    return conv
+
+
 def conv_forward_naive(_input,_filter,pad,stride):
 
     
@@ -54,12 +105,10 @@ def conv_forward_naive(_input,_filter,pad,stride):
             for w in range(n_W):
                 for c in range(n_C):
 
-                            
                         vert_start = h*stride
                         vert_end = vert_start + f
                         horiz_start = w * stride
                         horiz_end = horiz_start + f
-                        
     
                         a_slice = a_prev_pad[i,vert_start:vert_end,horiz_start:horiz_end,:]
                         
@@ -203,12 +252,12 @@ def forward_propagate(weights):
     
     activation_caches = {}
 
-    activation_caches["conv1"] = conv_forward_naive(train_x,weights["W1"],2,1)
+    activation_caches["conv1"] = conv_fast(train_x,weights["W1"],2,1)
     activation_caches["A1"] = relu(activation_caches["conv1"])
     activation_caches["pool1"] = max_pooling(activation_caches["A1"],2)
 
     
-    activation_caches["conv2"] = conv_forward_naive(activation_caches["pool1"],weights["W2"],2,1)   
+    activation_caches["conv2"] = conv_fast(activation_caches["pool1"],weights["W2"],2,1)   
     activation_caches["A2"] = relu(activation_caches["conv2"])
     activation_caches["pool2"]=max_pooling(activation_caches["A2"],2)       
     activation_caches["Ar2"] = activation_caches["pool2"].reshape((m, activation_caches["pool2"].shape[1] * 
