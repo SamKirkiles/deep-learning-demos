@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import cifar10
 import copy
 
+import time
+
 # Load in MNIST data and convert to one hot encoding. Only load in data if needed.
 
 try:
@@ -79,11 +81,29 @@ def conv_fast(x,w_filter,padding=1,stride=1):
     
     filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[1],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1).T
     
-    conv =   flat.dot(filter_flat)
+    conv = flat.dot(filter_flat)
                  
     #now the final reshape
     conv = conv.reshape(N,n_H,n_W,w_filter.shape[3])
     return conv
+
+def conv_fast_back(x,w_filter,dout,padding=1,stride=1):
+    
+    
+    f_h, f_w, c, f =  w_filter.shape
+    
+    # dw
+    flat = im2col_flat(x,f_h,f_w,padding,stride)
+    dout_reshape = dout.reshape(dout.shape[0],dout.shape[1]*dout.shape[2],dout.shape[3])
+    dout_reshape = np.repeat(dout_reshape[:,:,None,:],flat.shape[2],axis=2)
+    flat = np.repeat(flat[:,:,:,None],w_filter.shape[3],axis=3)
+    dw = flat * dout_reshape
+    dw= np.sum(dw,axis=(0,1))
+    dw = dw.reshape(c,f_h,f_w,f)
+    dw = np.moveaxis(dw,0,2)
+        
+    return dw,out
+
 
 
 def conv_forward_naive(_input,_filter,pad,stride):
@@ -136,9 +156,9 @@ def conv_back_naive(_input,_filter,pad,stride,dout):
             for p in range(n_C_prev):
                 for c in range(n_C):
 
-
+                    # go through all the individual positions that this filter affected and multiply by their dout
                     a_slice = a_prev_pad[:,h:h + n_H * stride:stride,w:w + n_W * stride:stride,p]
-
+                     
                     dw[h,w,p,c] = np.sum(a_slice * dout[:,:,:,c])
     
     
@@ -251,8 +271,8 @@ def check_gradients(weights,key,four_dimensional=False,inline_checker=False):
 def forward_propagate(weights):
     
     activation_caches = {}
-
-    activation_caches["conv1"] = conv_fast(train_x,weights["W1"],2,1)
+    
+    activation_caches["conv1"] = conv_fast(train_x,weights["W1"],2,1)    
     activation_caches["A1"] = relu(activation_caches["conv1"])
     activation_caches["pool1"] = max_pooling(activation_caches["A1"],2)
 
@@ -316,7 +336,6 @@ def backward_propagate(weights,caches):
     softmax_grad = softmax_back(caches["A4"], train_y_one_hot[0:m,...], m)
     dw4 = caches["A3"].T.dot(softmax_grad)
     
-    
     da3 = (weights["W4"].dot(softmax_grad.T)).T
     dz3 = relu_back(caches["Z3"]) * da3
     dw3 = caches["Ar2"].T.dot(dz3)
@@ -327,15 +346,16 @@ def backward_propagate(weights,caches):
     da2 = max_pooling_back(caches["A2"], caches["pool2"],dpool2_reshape)
     dz2 = relu_back(caches["conv2"]) * da2
     df2,dpool1 = conv_back_naive(caches["pool1"],weights["W2"],2,1,dz2) 
+    dw,out = conv_fast_back(caches["pool1"],weights["W2"],dz2,2,1) 
     
     da1 = max_pooling_back(caches["A1"], caches["pool1"],dpool1)
     dz1 = relu_back(caches["conv1"]) * da1
     df1,dinput = conv_back_naive(train_x,weights["W1"],2,1,dz1) 
     
-    return df1,df2,dw3,dw4
+    return df1,df2,dw3,dw4,dw,out
 
 
 caches,cost = forward_propagate(weights)
-df1,df2,dw3,dw4 = backward_propagate(weights,caches)
+df1,df2,dw3,dw4,dw,out = backward_propagate(weights,caches)
 backward_propagate_check(df1,df2,dw3,dw4,weights)
 
