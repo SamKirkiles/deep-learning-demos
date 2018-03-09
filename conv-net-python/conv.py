@@ -52,7 +52,10 @@ def im2col_flat(x,field_height,field_width,padding,stride):
     k = np.repeat(np.arange(C),field_height*field_width)
     
     
-    return x_padded[:,i,j,k]
+    return x_padded[:,i,j,k],(i,j,k)
+
+
+
     
                         
 def conv_fast(x,w_filter,padding=1,stride=1):
@@ -64,29 +67,77 @@ def conv_fast(x,w_filter,padding=1,stride=1):
     n_W = int(((W - w_filter.shape[1] + 2 * padding)/stride)+1)
 
     
-    flat = im2col_flat(x,w_filter.shape[0],w_filter.shape[1],padding,stride)
+    flat,dims = im2col_flat(x,w_filter.shape[0],w_filter.shape[1],padding,stride)
     
     filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[1],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1).T
     
-    conv =   flat.dot(filter_flat)
+    conv = flat.dot(filter_flat)
                  
     #now the final reshape
     conv = conv.reshape(N,n_H,n_W,w_filter.shape[3])
     return conv,flat
 
+
+def col2im_flat(x_shape,dims,col,padding,stride):
+    
+    #we want to ad d together all of the ones at each position
+    
+    n, h, w, c = x_shape
+    
+    padded_output = np.zeros((n,h + 2 * padding, w + 2 *padding,c))
+
+    col = np.sum(col,axis=1)
+
+    
+    #create index array that tells index for each training example
+    dims3 = np.zeros(col.shape,dtype=int)
+    dims3 = np.repeat(np.arange(col.shape[0])[:,None],col.shape[1],axis=1)
+    dims3 = np.repeat(dims3[:,:,None],col.shape[2],axis=2)
+    
+    # Add together the filter positions that each filter has influence over
+    np.add.at(padded_output [:,:,:,:],[dims3,dims[0],dims[1],dims[2]],col[:,:,:])
+
+    # remove padding
+    out = padded_output[:,padding:padding+h,padding:padding+w,:]
+
+    return out
+
+
 def conv_fast_back(x,w_filter,padding=1,stride=1):
     
     f_h, f_w, c, f =  w_filter.shape
+    
+    n, H, W, c = x.shape
+
+    n_H = int(((H - w_filter.shape[0]+ 2 * padding)/stride)+1)
+    n_W = int(((W - w_filter.shape[1] + 2 * padding)/stride)+1)
+
 
     dw = np.zeros(w_filter.shape)    
-    flat = im2col_flat(x,f_h,f_w,padding,stride)    
+    flat,dims = im2col_flat(x,f_h,f_w,padding,stride)      
     flat = np.sum(flat,axis=(0,1)).reshape(f_h,-1)
     flat = flat.reshape(c,f_w,f_h)
     
     flat = np.moveaxis(flat,0,-1)
     dw = np.repeat(flat[:,:,:,None],w_filter.shape[3],axis=3)
     
-    return dw,flat
+    # Finding dx is simply taking the flattened filter matrix and reshaping it into the
+    # input shape 
+    
+    #reshape filter into a flat column vector 
+    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[1],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1)
+    #repeat for the number of receptive fields
+    filter_flat = np.repeat(filter_flat[:,None,:],n_H*n_W,axis=1)
+    #Repeat for the number of training examples
+    filter_flat = np.repeat(filter_flat[None,:,:,:],n,axis=0)
+
+    flat,dims = im2col_flat(x,f_h,f_w,padding,stride)
+    
+    # Now take our flattened filter volume and transform it back into the size of the input image    
+    dx = col2im_flat(x.shape,dims,filter_flat,padding,stride)
+
+    
+    return dw,dx
 
 
 def check_gradients(_input,_filter,pad,stride):
@@ -196,8 +247,10 @@ end= time.clock()
 print(end-start)
 assert np.mean(fastconv == naiveconv) == 1
 
-dw_fast,flat = conv_fast_back(x,w_filter,1,2)
+dw_fast,dx_fast = conv_fast_back(x,w_filter,1,2)
 dw,dx= conv_back(x,w_filter,1,2)
 
 assert np.mean(dw_fast == dw) == 1
+assert np.mean(dx_fast == dx) == 1
+
 
