@@ -2,22 +2,20 @@
 
 import numpy as np
 import copy
-import time
 
-x = np.array([[[[1,1,2,2,1],[0,2,1,1,0],[1,2,1,1,1],[2,0,0,2,2],[0,2,1,1,0]],
-                         [[1,1,0,2,1],[2,0,0,1,0],[0,1,2,1,1],[2,0,2,1,0],[2,2,2,0,1]],
-                         [[2,2,0,1,2],[0,0,0,2,2],[1,2,1,1,2],[1,1,0,2,2],[1,2,1,0,1]]],[[[1,1,2,2,1],[0,2,1,1,0],[1,2,1,1,1],[2,0,0,2,2],[0,2,1,1,0]],
-                         [[1,1,0,2,1],[2,0,0,1,0],[0,1,2,1,1],[2,0,2,1,0],[2,2,2,0,1]],
-                         [[2,2,0,1,2],[0,0,0,2,2],[1,2,1,1,2],[1,1,0,2,2],[1,2,1,0,1]]]])
+x = np.array([[[[0,0,0,1,1],[1,1,1,2,0],[1,0,1,2,2],[1,1,2,1,2],[2,1,2,2,0]],
+                         [[0,1,1,0,1],[0,1,1,2,0],[0,0,0,2,0],[0,0,2,1,0],[1,2,0,1,2]],
+                         [[1,1,0,1,0],[1,1,0,2,0],[0,0,1,2,2],[2,2,1,2,1],[1,1,0,2,0]]]],dtype=float)
 x = np.moveaxis(x,1,-1)
 
-w0 = np.array([[[-1,0,0],[1,1,0],[1,1,-1]],
-               [[1,-1,-1],[0,-1,1],[1,-1,1]],
-               [[-1,-1,1],[-1,0,0],[-1,-1,-1]]])
+w0 = np.array([[[-1,1,1],[1,0,0],[-1,0,1]],
+               [[1,0,0-1],[1,1,0],[0,0,0]],
+               [[-1,-1,1],[-1,-1,-1],[1,0,1]]],dtype=float)
 
-w1 = np.array([[[-1,-1,0],[0,1,1],[-1,1,1]],
-               [[0,0,1],[1,1,0],[0,1,0]],
-               [[0,0,1],[-1,0,0],[-1,0,0]]])
+w1 = np.array([[[1,-1,-1],[-1,1,1],[-1,1,1]],
+               [[0,1,1],[-1,-1,-1],[-1,1,0]],
+               [[1,0,-1],[1,-1,1],[-1,1,-1]]],dtype=float)
+
 
 w_filter = np.array([w0,w1])
 w_filter = np.moveaxis(w_filter,0,-1)
@@ -55,13 +53,15 @@ def im2col_flat(x,field_height,field_width,padding,stride):
     return x_padded[:,i,j,k],(i,j,k)
 
 
-
-    
-                        
 def conv_fast(x,w_filter,padding=1,stride=1):
-    
+ 
     
     N,H, W, C = x.shape
+    
+    assert (H + 2 * padding - w_filter.shape[0]) % stride == 0
+    assert (W + 2 * padding - w_filter.shape[1]) % stride == 0
+
+        
     
     n_H = int(((H - w_filter.shape[0]+ 2 * padding)/stride)+1)
     n_W = int(((W - w_filter.shape[1] + 2 * padding)/stride)+1)
@@ -69,7 +69,7 @@ def conv_fast(x,w_filter,padding=1,stride=1):
     
     flat,dims = im2col_flat(x,w_filter.shape[0],w_filter.shape[1],padding,stride)
     
-    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[1],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1).T
+    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[2],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1).T
     
     conv = flat.dot(filter_flat)
                  
@@ -86,7 +86,6 @@ def col2im_flat(x_shape,dims,col,padding,stride):
     
     padded_output = np.zeros((n,h + 2 * padding, w + 2 *padding,c))
 
-    col = np.sum(col,axis=1)
 
     
     #create index array that tells index for each training example
@@ -111,32 +110,39 @@ def conv_fast_back(x,w_filter,padding=1,stride=1):
 
     n_H = int(((H - w_filter.shape[0]+ 2 * padding)/stride)+1)
     n_W = int(((W - w_filter.shape[1] + 2 * padding)/stride)+1)
-
-
-    dw = np.zeros(w_filter.shape)    
-    flat,dims = im2col_flat(x,f_h,f_w,padding,stride)      
-    flat = np.sum(flat,axis=(0,1)).reshape(f_h,-1)
-    flat = flat.reshape(c,f_w,f_h)
     
-    flat = np.moveaxis(flat,0,-1)
-    dw = np.repeat(flat[:,:,:,None],w_filter.shape[3],axis=3)
+    
+
+
+
+    flat,dims = im2col_flat(x,f_h,f_w,padding,stride)
+    flat = np.repeat(flat[:,:,:,None],w_filter.shape[3],axis=3)
+    dw = flat 
+    dw= np.sum(dw,axis=(0,1))
+    dw = dw.reshape(c,f_h,f_w,f)
+    dw = np.moveaxis(dw,0,2)
+
     
     # Finding dx is simply taking the flattened filter matrix and reshaping it into the
     # input shape 
     
-    #reshape filter into a flat column vector 
-    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[1],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1)
-    #repeat for the number of receptive fields
-    filter_flat = np.repeat(filter_flat[:,None,:],n_H*n_W,axis=1)
-    #Repeat for the number of training examples
-    filter_flat = np.repeat(filter_flat[None,:,:,:],n,axis=0)
+    
+    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[2],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1)
 
+    filter_flat = np.sum(filter_flat,axis=0)
+    
+    # repeat for the number of receptive fields
+    filter_flat = np.repeat(filter_flat[None,:],n_H*n_W,axis=0)
+
+    #Repeat for the number of training examples
+    filter_flat = np.repeat(filter_flat[None,:,:],n,axis=0)
+    
     flat,dims = im2col_flat(x,f_h,f_w,padding,stride)
+    
     
     # Now take our flattened filter volume and transform it back into the size of the input image    
     dx = col2im_flat(x.shape,dims,filter_flat,padding,stride)
 
-    
     return dw,dx
 
 
@@ -144,21 +150,23 @@ def check_gradients(_input,_filter,pad,stride):
     
     epsilon = 0.0001
     
+
     parameters1 = copy.deepcopy(_input)
     parameters2 = copy.deepcopy(_input)
-    
+        
     parameters1[0,0,0,0] += epsilon
-    parameters2[0,0,0,0] -= epsilon
+    parameters2[0,0,0,0] -= epsilon    
 
 
     out1 = conv(parameters1,_filter,pad,stride)
     out2 = conv(parameters2,_filter,pad,stride)
-
-    return (np.sum(out1)- np.sum(out2)) / (2. *epsilon)
+        
+    return (np.sum(out1) - np.sum(out2)) / (2. *epsilon)
 
 def conv(_input,_filter,pad,stride):
     # With filter size (f,f,c_prev,f_c)
     #and input matrix size (m,w,h,c)
+    
     
     (m, n_h, n_w, n_C_prev) = _input.shape
     (f,f, n_C_prev, n_C) = _filter.shape
@@ -184,7 +192,7 @@ def conv(_input,_filter,pad,stride):
                         a_slice = a_prev_pad[i,vert_start:vert_end,horiz_start:horiz_end,:]
                         
                         Z[i,h,w,c] = np.sum(np.multiply(a_slice, _filter[:,:,:,c]))
-    
+                            
     return Z
 
 
@@ -234,18 +242,17 @@ def conv_back(_input,_filter,pad,stride):
     dx = dx_pad[:,pad:pad+n_h,pad:pad+n_w,:]
     return Z,dx
 
-start = time.clock()                
+
+# TEST METHODS
+
+
 fastconv,test = conv_fast(x,w_filter,1,2)
-end = time.clock()
 
-print(end-start)
-
-start = time.clock()
 naiveconv = conv(x,w_filter,1,2)
-end= time.clock()
 
-print(end-start)
-assert np.mean(fastconv == naiveconv) == 1
+assert np.mean(np.isclose(fastconv,naiveconv)) == 1
+
+print(check_gradients(x,w_filter,1,2))
 
 dw_fast,dx_fast = conv_fast_back(x,w_filter,1,2)
 dw,dx= conv_back(x,w_filter,1,2)

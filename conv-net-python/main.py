@@ -39,6 +39,8 @@ def relu_back(Z):
 
 def im2col_flat(x,field_height,field_width,padding,stride):
     
+    #takes x and reshapes into a volume where each receptive field is a column vector
+        
     N,H, W, C = x.shape
     
     n_H = int(((H - field_height + 2 * padding)/stride)+1)
@@ -47,7 +49,7 @@ def im2col_flat(x,field_height,field_width,padding,stride):
     p = padding
     x_padded = np.pad(x, ((0, 0), (p, p), (p, p), (0, 0)), mode='constant')
 
-    #Find the shape of the filters across n_H
+    # Create indicies for each position of our convolution
         
     filters_h = np.repeat(np.arange(field_height),field_width)
     
@@ -61,11 +63,11 @@ def im2col_flat(x,field_height,field_width,padding,stride):
     width_index = filters_w + width
 
     j = np.tile(width_index,C)
-    
+
     k = np.repeat(np.arange(C),field_height*field_width)
     
     
-    return x_padded[:,i,j,k]
+    return x_padded[:,i,j,k],(i,j,k)
     
                         
 def conv_fast(x,w_filter,padding=1,stride=1):
@@ -73,13 +75,18 @@ def conv_fast(x,w_filter,padding=1,stride=1):
     
     N,H, W, C = x.shape
     
+    assert (H + 2 * padding - w_filter.shape[0]) % stride == 0
+    assert (W + 2 * padding - w_filter.shape[1]) % stride == 0
+
+    
     n_H = int(((H - w_filter.shape[0]+ 2 * padding)/stride)+1)
     n_W = int(((W - w_filter.shape[1] + 2 * padding)/stride)+1)
 
     
-    flat = im2col_flat(x,w_filter.shape[0],w_filter.shape[1],padding,stride)
+    flat,dims = im2col_flat(x,w_filter.shape[0],w_filter.shape[1],padding,stride)    
+    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[2],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1).T
     
-    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[1],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1).T
+    #automatic broadcasting will handle this for us 
     
     conv = flat.dot(filter_flat)
                  
@@ -87,13 +94,40 @@ def conv_fast(x,w_filter,padding=1,stride=1):
     conv = conv.reshape(N,n_H,n_W,w_filter.shape[3])
     return conv
 
-def conv_fast_back(x,w_filter,dout,padding=1,stride=1):
+
+def col2im_flat(x_shape,dims,col,padding,stride):
     
+    #we want to ad d together all of the ones at each position
+    
+    n, h, w, c = x_shape
+    
+    padded_output = np.zeros((n,h + 2 * padding, w + 2 *padding,c))    
+    #create index array that tells index for each training example
+    dims3 = np.zeros(col.shape,dtype=int)
+    # repeat index into training examples for number of receptive fields
+    dims3 = np.repeat(np.arange(col.shape[0])[:,None],col.shape[1],axis=1)
+    # repeat index through number of filter elements
+    dims3 = np.repeat(dims3[:,:,None],col.shape[2],axis=2)
+    # Add together the filter positions that each filter has influence over
+    np.add.at(padded_output[:,:,:,:],[dims3,dims[0],dims[1],dims[2]],col[:,:,:])
+    
+    out = padded_output[:,padding:padding+h,padding:padding+w,:]
+    
+    return out
+
+
+def conv_fast_back(x,w_filter,dout,padding=1,stride=1):
     
     f_h, f_w, c, f =  w_filter.shape
     
+    n, H, W, c = x.shape
+
+    n_H = int(((H - w_filter.shape[0]+ 2 * padding)/stride)+1)
+    n_W = int(((W - w_filter.shape[1] + 2 * padding)/stride)+1)
+        
     # dw
-    flat = im2col_flat(x,f_h,f_w,padding,stride)
+    flat,dims = im2col_flat(x,f_h,f_w,padding,stride)
+    
     dout_reshape = dout.reshape(dout.shape[0],dout.shape[1]*dout.shape[2],dout.shape[3])
     dout_reshape = np.repeat(dout_reshape[:,:,None,:],flat.shape[2],axis=2)
     flat = np.repeat(flat[:,:,:,None],w_filter.shape[3],axis=3)
@@ -101,9 +135,31 @@ def conv_fast_back(x,w_filter,dout,padding=1,stride=1):
     dw= np.sum(dw,axis=(0,1))
     dw = dw.reshape(c,f_h,f_w,f)
     dw = np.moveaxis(dw,0,2)
-        
-    return dw,out
+    
+    # Finding dx is simply taking the flattened filter matrix and reshaping it into the
+    # input shape 
+    
+    # TODO: This is not outputting the correct value
+    doutr = dout.reshape(dout.shape[0],dout.shape[1]*dout.shape[2],dout.shape[3])
+    doutr = np.moveaxis(doutr,2,1)
+    #reshape filter into a flat column vector 
+    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[2],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1)
+    # repeat for the number of receptive fields
+    filter_flat = np.repeat(filter_flat[:,None,:],n_H*n_W,axis=1)
+    
+    
+    filter_flat = np.repeat(filter_flat[None,:,:,:],n,axis=0)
+    doutr = np.repeat(doutr[:,:,:,None],filter_flat.shape[3],axis=3)
+    filter_flat = filter_flat * doutr
 
+    filter_flat = np.sum(filter_flat,axis=1)
+    #Repeat for the number of training examples
+    
+    flat,dims = im2col_flat(x,f_h,f_w,padding,stride)
+    # Now take our flattened filter volume and transform it back into the size of the input image    
+    dx = col2im_flat(x.shape,dims,filter_flat,padding,stride)
+    
+    return dw,dx
 
 
 def conv_forward_naive(_input,_filter,pad,stride):
@@ -160,10 +216,10 @@ def conv_back_naive(_input,_filter,pad,stride,dout):
                     a_slice = a_prev_pad[:,h:h + n_H * stride:stride,w:w + n_W * stride:stride,p]
                      
                     dw[h,w,p,c] = np.sum(a_slice * dout[:,:,:,c])
-    
-    
+                    
+    # TODO: put back in dout to get correct gradient
     dx_pad = np.pad(dx, ((0,0),(pad,pad),(pad,pad),(0,0)), 'constant', constant_values=0)
-    
+        
     for i in range(m):        
         for h_output in range(n_H):
             for w_output in range(n_W):
@@ -173,7 +229,6 @@ def conv_back_naive(_input,_filter,pad,stride,dout):
                     vert_end = vert_start + f
                     horiz_start = w_output * stride
                     horiz_end = horiz_start + f
-                    
                     dx_pad[i,vert_start:vert_end,horiz_start:horiz_end,:] += _filter[:,:,:,g] * dout[i,h_output,w_output,g]
                                     
                 
@@ -268,20 +323,31 @@ def check_gradients(weights,key,four_dimensional=False,inline_checker=False):
     return (cost1 - cost2) / (2. *epsilon)
 
 
-def forward_propagate(weights):
+def forward_propagate(weights,debug=True):
     
     activation_caches = {}
     
-    activation_caches["conv1"] = conv_fast(train_x,weights["W1"],2,1)    
+    activation_caches["conv1"] = conv_fast(train_x,weights["W1"],2,1)
     activation_caches["A1"] = relu(activation_caches["conv1"])
     activation_caches["pool1"] = max_pooling(activation_caches["A1"],2)
 
+    # Sanity check to make sure that our convolution vectorization is correct
+    if debug:
+        conv1_verify = conv_forward_naive(train_x,weights["W1"],2,1)
+        assert np.mean(np.isclose(activation_caches["conv1"],conv1_verify)) == 1.0
+    
     
     activation_caches["conv2"] = conv_fast(activation_caches["pool1"],weights["W2"],2,1)   
     activation_caches["A2"] = relu(activation_caches["conv2"])
     activation_caches["pool2"]=max_pooling(activation_caches["A2"],2)       
     activation_caches["Ar2"] = activation_caches["pool2"].reshape((m, activation_caches["pool2"].shape[1] * 
                      activation_caches["pool2"].shape[2] * activation_caches["pool2"].shape[3]))
+    
+    
+    if debug:
+        conv2_verify = conv_forward_naive(activation_caches["pool1"],weights["W2"],2,1)
+        assert np.mean(np.isclose(activation_caches["conv2"],conv2_verify)) == 1.0
+
 
     activation_caches["Z3"] = fully_connected(activation_caches["Ar2"], weights["W3"])
     activation_caches["A3"] = relu(activation_caches["Z3"])
@@ -329,33 +395,46 @@ def backward_propagate_check(df1,df2,dw3,dw4, weights):
     print("Gradient Calculated W1: " + str(df1[0,0,0,0]))
     
     
-def backward_propagate(weights,caches):
+def backward_propagate(weights,caches,debug=True):
     
     print("\nTesting Backprop \n")
     
     softmax_grad = softmax_back(caches["A4"], train_y_one_hot[0:m,...], m)
     dw4 = caches["A3"].T.dot(softmax_grad)
-    
+        
     da3 = (weights["W4"].dot(softmax_grad.T)).T
     dz3 = relu_back(caches["Z3"]) * da3
     dw3 = caches["Ar2"].T.dot(dz3)
-    
+        
     dpool2 = weights["W3"].dot(dz3.T).T
     dpool2_reshape = dpool2.reshape(caches["pool2"].shape)
     
     da2 = max_pooling_back(caches["A2"], caches["pool2"],dpool2_reshape)
     dz2 = relu_back(caches["conv2"]) * da2
-    df2,dpool1 = conv_back_naive(caches["pool1"],weights["W2"],2,1,dz2) 
-    dw,out = conv_fast_back(caches["pool1"],weights["W2"],dz2,2,1) 
     
+    # TODO: Make sure this assertion passes
+    df2,dpool1 = conv_fast_back(caches["pool1"],weights["W2"],dz2,2,1) 
+
+    if debug:
+        df2_naive,dpool1_naive = conv_back_naive(caches["pool1"],weights["W2"],2,1,dz2)   
+        assert np.mean(np.isclose(df2,df2_naive)) == 1.0
+        assert np.mean(np.isclose(dpool1,dpool1_naive)) == 1.0
+
     da1 = max_pooling_back(caches["A1"], caches["pool1"],dpool1)
     dz1 = relu_back(caches["conv1"]) * da1
-    df1,dinput = conv_back_naive(train_x,weights["W1"],2,1,dz1) 
+    df1,dinput = conv_fast_back(train_x,weights["W1"],dz1,2,1) 
     
-    return df1,df2,dw3,dw4,dw,out
+    if debug:
+        df1_naive,dinput_naive = conv_back_naive(train_x,weights["W1"],2,1,dz1)   
+        assert np.mean(np.isclose(df1,df1_naive)) == 1.0
+        assert np.mean(np.isclose(dinput,dinput_naive)) == 1.0
+
+    print("Done")
+    return df1,df2,dw3,dw4
 
 
-caches,cost = forward_propagate(weights)
-df1,df2,dw3,dw4,dw,out = backward_propagate(weights,caches)
+caches,cost = forward_propagate(weights,debug=False)
+df1,df2,dw3,dw4= backward_propagate(weights,caches,debug=False)
 backward_propagate_check(df1,df2,dw3,dw4,weights)
+
 
