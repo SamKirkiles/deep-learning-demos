@@ -19,7 +19,7 @@ except NameError:
     classes = cifar10.load_class_names()
 
 
-m = 50
+m = 20
 
 train_x = train_x_raw[0:m]
 
@@ -28,6 +28,8 @@ print("Displaying random training example")
 plt.imshow(train_x_raw[np.random.randint(m),:,:,:])
 plt.show()
 
+
+#Normalize training data
 train_x  = (train_x -np.mean(train_x ))/(np.max(train_x )-np.min(train_x ))
 
     
@@ -106,10 +108,9 @@ def col2im_flat(x_shape,dims,col,padding,stride):
     dims3 = np.zeros(col.shape,dtype=int)
     # repeat index into training examples for number of receptive fields
     dims3 = np.repeat(np.arange(col.shape[0])[:,None],col.shape[1],axis=1)
-    # repeat index through number of filter elements
-    dims3 = np.repeat(dims3[:,:,None],col.shape[2],axis=2)
+
     # Add together the filter positions that each filter has influence over
-    np.add.at(padded_output[:,:,:,:],[dims3,dims[0],dims[1],dims[2]],col[:,:,:])
+    np.add.at(padded_output,[dims3[:,:,None],dims[0],dims[1],dims[2]],col)
     
     out = padded_output[:,padding:padding+h,padding:padding+w,:]
     
@@ -143,19 +144,17 @@ def conv_fast_back(x,w_filter,dout,padding=1,stride=1):
     doutr = dout.reshape(dout.shape[0],dout.shape[1]*dout.shape[2],dout.shape[3])
     doutr = np.moveaxis(doutr,2,1)
     #reshape filter into a flat column vector 
-    filter_flat = w_filter[:,:,:,:].reshape(-1,w_filter.shape[2],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1)
+    filter_flat = w_filter.reshape(-1,w_filter.shape[2],w_filter.shape[3]).T.reshape(w_filter.shape[3],-1)
     # repeat for the number of receptive fields
     filter_flat = np.repeat(filter_flat[:,None,:],n_H*n_W,axis=1)
     
-    
+    # automatic broadcasting will take care of this
     filter_flat = np.repeat(filter_flat[None,:,:,:],n,axis=0)
-    doutr = np.repeat(doutr[:,:,:,None],filter_flat.shape[3],axis=3)
-    filter_flat = filter_flat * doutr
+    filter_flat = filter_flat * doutr[:,:,:,None]
 
     filter_flat = np.sum(filter_flat,axis=1)
     #Repeat for the number of training examples
     
-    flat,dims = im2col_flat(x,f_h,f_w,padding,stride)
     # Now take our flattened filter volume and transform it back into the size of the input image    
     dx = col2im_flat(x.shape,dims,filter_flat,padding,stride)
     
@@ -323,21 +322,21 @@ def check_gradients(weights,key,four_dimensional=False,inline_checker=False):
     return (cost1 - cost2) / (2. *epsilon)
 
 
-def forward_propagate(weights,debug=True):
+def forward_propagate(_weights,debug=True):
     
     activation_caches = {}
     
-    activation_caches["conv1"] = conv_fast(train_x,weights["W1"],2,1)
+    activation_caches["conv1"] = conv_fast(train_x,_weights["W1"],2,1)
     activation_caches["A1"] = relu(activation_caches["conv1"])
     activation_caches["pool1"] = max_pooling(activation_caches["A1"],2)
 
     # Sanity check to make sure that our convolution vectorization is correct
     if debug:
-        conv1_verify = conv_forward_naive(train_x,weights["W1"],2,1)
+        conv1_verify = conv_forward_naive(train_x,_weights["W1"],2,1)
         assert np.mean(np.isclose(activation_caches["conv1"],conv1_verify)) == 1.0
     
     
-    activation_caches["conv2"] = conv_fast(activation_caches["pool1"],weights["W2"],2,1)   
+    activation_caches["conv2"] = conv_fast(activation_caches["pool1"],_weights["W2"],2,1)   
     activation_caches["A2"] = relu(activation_caches["conv2"])
     activation_caches["pool2"]=max_pooling(activation_caches["A2"],2)       
     activation_caches["Ar2"] = activation_caches["pool2"].reshape((m, activation_caches["pool2"].shape[1] * 
@@ -345,15 +344,15 @@ def forward_propagate(weights,debug=True):
     
     
     if debug:
-        conv2_verify = conv_forward_naive(activation_caches["pool1"],weights["W2"],2,1)
+        conv2_verify = conv_forward_naive(activation_caches["pool1"],_weights["W2"],2,1)
         assert np.mean(np.isclose(activation_caches["conv2"],conv2_verify)) == 1.0
 
 
-    activation_caches["Z3"] = fully_connected(activation_caches["Ar2"], weights["W3"])
+    activation_caches["Z3"] = fully_connected(activation_caches["Ar2"], _weights["W3"])
     activation_caches["A3"] = relu(activation_caches["Z3"])
     
     
-    activation_caches["Z4"] = fully_connected(activation_caches["A3"],weights["W4"])
+    activation_caches["Z4"] = fully_connected(activation_caches["A3"],_weights["W4"])
     activation_caches["A4"] = softmax(activation_caches["Z4"])
     
     cost = np.mean(softmax_cost(train_y_one_hot[0:m,...], activation_caches["A4"]))
@@ -397,7 +396,8 @@ def backward_propagate_check(df1,df2,dw3,dw4, weights):
     
 def backward_propagate(weights,caches,debug=True):
     
-    print("\nTesting Backprop \n")
+    if debug:
+        print("Testing Backprop")
     
     softmax_grad = softmax_back(caches["A4"], train_y_one_hot[0:m,...], m)
     dw4 = caches["A3"].T.dot(softmax_grad)
@@ -412,29 +412,55 @@ def backward_propagate(weights,caches,debug=True):
     da2 = max_pooling_back(caches["A2"], caches["pool2"],dpool2_reshape)
     dz2 = relu_back(caches["conv2"]) * da2
     
-    # TODO: Make sure this assertion passes
-    df2,dpool1 = conv_fast_back(caches["pool1"],weights["W2"],dz2,2,1) 
+    df2,dpool1 = conv_fast_back(caches["pool1"],weights["W2"],dz2,2,1)        
 
     if debug:
-        df2_naive,dpool1_naive = conv_back_naive(caches["pool1"],weights["W2"],2,1,dz2)   
+        df2_naive,dpool1_naive= conv_back_naive(caches["pool1"],weights["W2"],2,1,dz2)   
         assert np.mean(np.isclose(df2,df2_naive)) == 1.0
         assert np.mean(np.isclose(dpool1,dpool1_naive)) == 1.0
 
     da1 = max_pooling_back(caches["A1"], caches["pool1"],dpool1)
     dz1 = relu_back(caches["conv1"]) * da1
     df1,dinput = conv_fast_back(train_x,weights["W1"],dz1,2,1) 
+
+
     
     if debug:
-        df1_naive,dinput_naive = conv_back_naive(train_x,weights["W1"],2,1,dz1)   
+        df1_naive,dinput_naive= conv_back_naive(train_x,weights["W1"],2,1,dz1)   
         assert np.mean(np.isclose(df1,df1_naive)) == 1.0
         assert np.mean(np.isclose(dinput,dinput_naive)) == 1.0
 
-    print("Done")
     return df1,df2,dw3,dw4
 
+"""
+caches,cost = forward_propagate(weights,debug=True)
 
-caches,cost = forward_propagate(weights,debug=False)
+# vectorized
+start = time.clock()
 df1,df2,dw3,dw4= backward_propagate(weights,caches,debug=False)
-backward_propagate_check(df1,df2,dw3,dw4,weights)
+print(df1)
+end = time.clock()
+print(end-start)
+
+#backward_propagate_check(df1,df2,dw3,dw4,weights)
+"""
+
+
+iterations = 1000
+
+for i in range(iterations):
+    
+    caches,cost = forward_propagate(weights,debug=False)
+    df1,df2,dw3,dw4= backward_propagate(weights,caches,debug=False)
+    
+    
+    weights["W1"] -= 0.001 * df1
+    weights["W2"] -= 0.001 * df2
+    weights["W3"] -= 0.01 * dw3
+    weights["W4"] -= 0.01 * dw4
+
+    print(cost)
+
+
 
 
