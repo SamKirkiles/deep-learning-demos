@@ -70,7 +70,7 @@ num_classes = 10
 _num_files_train = 1
 
 # Number of images for each batch-file in the training-set.
-_images_per_file = 10000
+_images_per_file = 50000
 
 # Total number of images in the training-set.
 # This is used to pre-allocate arrays for efficiency.

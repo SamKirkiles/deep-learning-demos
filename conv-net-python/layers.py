@@ -5,10 +5,13 @@ import numpy as np
 def relu(x):
     return np.maximum(0, x)
 
-def relu_back(Z):
-    return np.int64(Z > 0)
+def relu_back(x,dout):
+    dx = np.array(dout, copy=True)
+    dx[x <= 0] = 0
 
-def conv_forward_naive(_input,_filter,pad,stride):
+    return dx
+
+def conv_forward_naive(_input,_filter,b,pad,stride):
 
     
     (m, n_h, n_w, n_C_prev) = _input.shape
@@ -36,7 +39,7 @@ def conv_forward_naive(_input,_filter,pad,stride):
                         
                         Z[i,h,w,c] = np.sum(np.multiply(a_slice, _filter[:,:,:,c]))
     
-    return Z
+    return Z + b[None,None,None,:]
 
 
 def conv_back_naive(_input,_filter,pad,stride,dout):
@@ -79,14 +82,18 @@ def conv_back_naive(_input,_filter,pad,stride,dout):
                 
     dx = dx_pad[:,pad:pad+n_h,pad:pad+n_w,:]
                 
-    return dw,dx
+    db = np.sum(dout,axis=(0,1,2))
 
-def max_pooling(prev_layer, filter_size=2):
+    return dw,dx,db
+
+def max_pooling(prev_layer, filter_size=2,stride=2):
     
     (m, n_H_prev, n_W_prev, channels) = prev_layer.shape
     
-    n_H = int((n_H_prev - filter_size)/filter_size + 1)
-    n_W = int((n_W_prev - filter_size)/filter_size + 1)
+    stride = 2
+
+    n_H = int((n_H_prev - filter_size)/stride + 1)
+    n_W = int((n_W_prev - filter_size)/stride + 1)
     
     pooling = np.zeros((m,n_H,n_W,channels))
     
@@ -130,8 +137,8 @@ def max_pooling_back(prev, pool, dout, filter_size=2):
     return empty
 
 
-def fully_connected(prev_layer, w):
-    return prev_layer.dot(w)
+def fully_connected(prev_layer, w,b):
+    return prev_layer.dot(w) + b
 
 def softmax(z):
     return np.exp(z)/np.sum(np.exp(z),axis=1)[:,None]
@@ -139,5 +146,5 @@ def softmax(z):
 def softmax_back(softmax, Y,m):    
     return (softmax-Y)/m
 
-def softmax_cost(y, y_hat):
+def softmax_cost(y, y_hat,m):
     return -np.sum(y * np.log(y_hat),axis=1)
